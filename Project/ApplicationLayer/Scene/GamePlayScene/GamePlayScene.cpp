@@ -14,6 +14,21 @@
 #include <DebugCamera.h>
 #endif // _DEBUG
 
+namespace
+{
+	OBB testObb =
+	{
+		.center = {0.0f, 0.0f, 0.0f},
+		.orientations = {
+			{1.0f, 0.0f, 0.0f},
+			{0.0f, 1.0f, 0.0f},
+			{0.0f, 0.0f, 1.0f}
+		},
+		.size = {1.0f, 1.0f, 1.0f}
+	};
+	Vector4 testColor = { 1.0f, 1.0f, 0.0f, 1.0f };
+}
+
 
 /// -------------------------------------------------------------
 ///				　			　初期化処理
@@ -27,39 +42,53 @@ void GamePlayScene::Initialize()
 
 	dxCommon_ = DirectXCommon::GetInstance();
 	input_ = Input::GetInstance();
-	particleManager = ParticleManager::GetInstance();
 
-	/// ---------- サウンドの初期化 ---------- ///
-	AudioManager::GetInstance()->PlayBGM("Peritune_Gentle_Brew.mp3", 0.5f, 1.0f, true);
+	// カーソルをロック
+	Input::GetInstance()->SetLockCursor(true);
+	ShowCursor(true);// 表示・非表示も連動（オプション）
 
-	// terrainの生成と初期化
-	objectTerrain_ = std::make_unique<Object3D>();
-	objectTerrain_->Initialize("terrain.obj");
-	objectTerrain_->SetTranslate({ 0.0f, -1.0f, 0.0f });
-	objectTerrain_->SetReflectivity(0.0f);
+	// プレイヤーの生成と初期化
+	player_ = std::make_unique<Player>();
+	player_->Initialize();
 
-	objectBall_ = std::make_unique<Object3D>();
-	objectBall_->Initialize("sphere.gltf");
-	objectBall_->SetTranslate({ -2.0f, 0.0f, 0.0f });
+	// エネミーの生成と初期化
+	enemy_ = std::make_unique<Enemy>();
+	enemy_->Initialize();
+	enemy_->SetTarget(player_.get());
 
-	particleManager->CreateParticleGroup("Fire", "gradationLine.png");
-	particleEmitter_ = std::make_unique<ParticleEmitter>(particleManager, "Fire");
-	particleEmitter_->SetPosition({ 0.0f,3.0f,10.0f });
-	particleEmitter_->SetEmissionRate(3.0f);
+	// 追従カメラの生成と初期化
+	fpsCamera_ = std::make_unique<FpsCamera>();
+	fpsCamera_->Initialize(player_.get());
 
-	animationModelNoskeleton_ = std::make_unique<AnimationModel>();
-	animationModelNoskeleton_->Initialize("AnimatedCube.gltf", true, false);
-	animationModelNoskeleton_->SetTranslate({ 10.0f, 0.0f, 0.0f });
-	animationModelNoskeleton_->SetReflectivity(0.0f);
+	// プレイヤーにカメラを設定
+	player_->SetCamera(fpsCamera_->GetCamera());
 
-	animationModelSkeleton_ = std::make_unique<AnimationModel>();
-	animationModelSkeleton_->Initialize("walk.gltf", true, true);
-
-	skyBox_ = std::make_unique<SkyBox>();
-	skyBox_->Initialize("rostock_laage_airport_4k.dds");
+	// クロスヘアの生成と初期化
+	crosshair_ = std::make_unique<Crosshair>();
+	crosshair_->Initialize();
 
 	// 衝突マネージャの生成
 	collisionManager_ = std::make_unique<CollisionManager>();
+	collisionManager_->Initialize();
+
+	ParticleManager::GetInstance()->CreateParticleGroup("DefaultParticle", "circle2.png", ParticleEffectType::Default);
+	defaultEmitter_ = std::make_unique<ParticleEmitter>(ParticleManager::GetInstance(), "DefaultParticle");
+	defaultEmitter_->SetPosition({ 0.0f, 18.0f, 20.0f });
+
+	// 
+	ParticleManager::GetInstance()->CreateParticleGroup("TestParticle", "gradationLine.png", ParticleEffectType::Ring);
+	particleEmitter_ = std::make_unique<ParticleEmitter>(ParticleManager::GetInstance(), "TestParticle");
+	particleEmitter_->SetPosition({ 5.0f, 18.0f, 20.0f });
+
+	// パーティクルエミッターの初期化
+	ParticleManager::GetInstance()->CreateParticleGroup("TestParticle2", "gradationLine.png", ParticleEffectType::Cylinder);
+	particleEmitter2_ = std::make_unique<ParticleEmitter>(ParticleManager::GetInstance(), "TestParticle2");
+	particleEmitter2_->SetPosition({ -5.0f, 18.0f, 20.0f });
+
+	ParticleManager::GetInstance()->CreateParticleGroup("TestParticle3", "gradationLine.png", ParticleEffectType::Slash);
+	particleEmitter3_ = std::make_unique<ParticleEmitter>(ParticleManager::GetInstance(), "TestParticle3");
+	particleEmitter3_->SetPosition({ 5.0f, 18.0f, 20.0f });
+	particleEmitter3_->SetEmissionRate(3.0f);
 }
 
 
@@ -74,31 +103,62 @@ void GamePlayScene::Update()
 		Object3DCommon::GetInstance()->SetDebugCamera(!Object3DCommon::GetInstance()->GetDebugCamera());
 		Wireframe::GetInstance()->SetDebugCamera(!Wireframe::GetInstance()->GetDebugCamera());
 		ParticleManager::GetInstance()->SetDebugCamera(!ParticleManager::GetInstance()->GetDebugCamera());
-		skyBox_->SetDebugCamera(!skyBox_->GetDebugCamera());
+		//skyBox_->SetDebugCamera(!skyBox_->GetDebugCamera());
 		isDebugCamera_ = !isDebugCamera_;
 		Input::GetInstance()->SetLockCursor(isDebugCamera_);
 		ShowCursor(!isDebugCamera_);// 表示・非表示も連動（オプション）
 	}
 #endif // _DEBUG
 
-	// オブジェクトの更新処理
-	objectTerrain_->Update();
-	objectBall_->Update();
+	// --- ポーズトグル（ESCキーでON/OFF） ---
+	if (input_->TriggerKey(DIK_ESCAPE))
+	{
+		if (gameState_ == GameState::Playing)
+		{
+			gameState_ = GameState::Paused;
+			Input::GetInstance()->SetLockCursor(false);
+			ShowCursor(true);
+		}
+		else if (gameState_ == GameState::Paused)
+		{
+			gameState_ = GameState::Playing;
+			Input::GetInstance()->SetLockCursor(true);
+			ShowCursor(false);
+		}
+	}
 
+	switch (gameState_)
+	{
+	case GameState::Playing:
+		player_->Update();
+		fpsCamera_->Update(false);
+		crosshair_->Update();
+		enemy_->Update();
+		collisionManager_->Update();
+		CheckAllCollisions();
+		break;
+
+	case GameState::Paused:
+
+#ifdef _DEBUG
+		// 衝突判定
+		collisionManager_->Update();
+#endif // _DEBUG
+
+		fpsCamera_->Update(true); // 回転行列だけ更新するなら true を渡す
+		// 何も動かさない（またはポーズUIだけ更新）
+		break;
+	}
+
+	defaultEmitter_->Update();
 	particleEmitter_->Update();
-
-	animationModelNoskeleton_->Update();
-
-	animationModelSkeleton_->Update();
-
-	skyBox_->Update();
-
-	// 衝突判定と応答
-	CheckAllCollisions();
+	particleEmitter2_->Update();
+	particleEmitter3_->Update();
 }
 
+
 /// -------------------------------------------------------------
-///				　			　 描画処理
+///				　			　 3Dオブジェクトの描画
 /// -------------------------------------------------------------
 void GamePlayScene::Draw3DObjects()
 {
@@ -106,7 +166,6 @@ void GamePlayScene::Draw3DObjects()
 
 	// スカイボックスの共通描画設定
 	SkyBoxManager::GetInstance()->SetRenderSetting();
-	//skyBox_->Draw();
 
 #pragma endregion
 
@@ -116,23 +175,28 @@ void GamePlayScene::Draw3DObjects()
 	// オブジェクト3D共通描画設定
 	Object3DCommon::GetInstance()->SetRenderSetting();
 
-	// Terrain.obj の描画
-	objectTerrain_->Draw();
+	// プレイヤーの描画
+	player_->Draw();
 
-	// 球体の描画
-	//objectBall_->Draw();
-
-	animationModelNoskeleton_->Draw();
-
-	animationModelSkeleton_->Draw();
+	// エネミーの描画
+	enemy_->Draw();
 
 #pragma endregion
 
+
+#ifdef _DEBUG
+	// 衝突判定を行うオブジェクトの描画
+	collisionManager_->Draw();
+
 	// ワイヤーフレームの描画
-	//Wireframe::GetInstance()->DrawGrid(100.0f, 20.0f, { 0.25f, 0.25f, 0.25f,1.0f });
+	Wireframe::GetInstance()->DrawGrid(1000.0f, 100.0f, { 0.25f, 0.25f, 0.25f,1.0f });
+#endif // _DEBUG
 }
 
 
+/// -------------------------------------------------------------
+///				　			　 2Dスプライトの描画
+/// -------------------------------------------------------------
 void GamePlayScene::Draw2DSprites()
 {
 #pragma region スプライトの描画                    
@@ -148,6 +212,12 @@ void GamePlayScene::Draw2DSprites()
 	// UI用の共通描画設定
 	SpriteManager::GetInstance()->SetRenderSetting_UI();
 
+	// クロスヘアの描画
+	crosshair_->Draw();
+
+	// プレイヤーのHUD描画
+	player_->DrawHUD();
+
 #pragma endregion
 }
 
@@ -157,7 +227,7 @@ void GamePlayScene::Draw2DSprites()
 /// -------------------------------------------------------------
 void GamePlayScene::Finalize()
 {
-	AudioManager::GetInstance()->StopBGM();
+
 }
 
 
@@ -166,19 +236,14 @@ void GamePlayScene::Finalize()
 /// -------------------------------------------------------------
 void GamePlayScene::DrawImGui()
 {
-	ImGui::Begin("Test Window");
-
-	// TerrainのImGui
-	//objectTerrain_->DrawImGui();
-
-	objectBall_->DrawImGui();
-
-	ImGui::End();
-
-	animationModelSkeleton_->DrawImGui();
-
 	// ライト
 	LightManager::GetInstance()->DrawImGui();
+
+	// プレイヤー
+	player_->DrawImGui();
+
+	// エネミー
+	enemy_->DrawImGui();
 }
 
 
@@ -191,9 +256,40 @@ void GamePlayScene::CheckAllCollisions()
 	collisionManager_->Reset();
 
 	// コライダーをリストに登録
-	// collisionManager_->AddCollider();
+	collisionManager_->AddCollider(player_.get());
 
-	// 複数について
+	// 敵のコライダーを登録
+	collisionManager_->AddCollider(enemy_.get());
+
+	// プレイヤーの弾の登録
+	for (const auto& bullet : player_->GetBullets())
+	{
+		if (!bullet->IsDead())
+		{
+			collisionManager_->AddCollider(bullet.get());
+		}
+	}
+
+	// エネミーの弾丸の登録
+	for (const auto& bullet : enemy_->GetBullets())
+	{
+		if (!bullet->IsDead())
+		{
+			collisionManager_->AddCollider(bullet.get());
+		}
+	}
+
+	// 死亡したらコライダーを削除
+	if (enemy_->IsDead())
+	{
+		collisionManager_->RemoveCollider(enemy_.get());
+
+		for (const auto& bullet : enemy_->GetBullets())
+		{
+			collisionManager_->RemoveCollider(bullet.get());
+		}
+	}
+	if (player_->IsDead()) collisionManager_->RemoveCollider(player_.get());
 
 	// 衝突判定と応答
 	collisionManager_->CheckAllCollisions();

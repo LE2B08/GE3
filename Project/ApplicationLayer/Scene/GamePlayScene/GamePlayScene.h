@@ -7,18 +7,28 @@
 #include "ParticleEmitter.h"
 #include <BaseScene.h>
 
-#include "AnimationModel.h"
-#include "SkyBox.h"
-
 #include "CollisionManager.h"
 
-#include "AABB.h"
-#include "OBB.h"
+#include "Player.h"
+#include "FpsCamera.h"
+#include "Crosshair.h"
+#include "Enemy.h"
+
 
 /// ---------- 前方宣言 ---------- ///
 class DirectXCommon;
 class Input;
 
+
+/// -------------------------------------------------------------
+///				　		ゲームの状態を管理する列挙型
+/// -------------------------------------------------------------
+enum class GameState
+{
+	Playing,
+	Paused,
+	// 追加例：Menu, GameOver, Cutscene など
+};
 
 /// -------------------------------------------------------------
 ///				　		ゲームプレイシーン
@@ -45,7 +55,6 @@ public: /// ---------- メンバ関数 ---------- ///
 	// ImGui描画処理
 	void DrawImGui() override;
 
-
 private: /// ---------- メンバ関数 ---------- ///
 
 	// 衝突判定と応答
@@ -55,21 +64,26 @@ private: /// ---------- メンバ変数 ---------- ///
 
 	DirectXCommon* dxCommon_ = nullptr;
 	Input* input_ = nullptr;
-	ParticleManager* particleManager = nullptr;
 
-	std::unique_ptr<Object3D> objectTerrain_;
-	std::unique_ptr<Object3D> objectBall_;
-	std::unique_ptr<Sprite> sprites_;
-	std::unique_ptr<CollisionManager> collisionManager_;
-	std::unique_ptr<ParticleEmitter> particleEmitter_;
-	std::unique_ptr<AnimationModel> animationModelNoskeleton_;
-	std::unique_ptr<AnimationModel> animationModelSkeleton_;
+	GameState gameState_ = GameState::Playing; // ゲームの状態
 
+	std::unique_ptr<Player> player_ = nullptr; // プレイヤーオブジェクト
+	std::unique_ptr<FpsCamera> fpsCamera_ = nullptr; // カメラオブジェクト
+	std::unique_ptr<Crosshair> crosshair_ = nullptr; // クロスヘアオブジェクト
+	std::unique_ptr<Enemy> enemy_ = nullptr; // 敵オブジェクト
 
-	std::unique_ptr<SkyBox> skyBox_;
+	std::unique_ptr<CollisionManager> collisionManager_; // 衝突マネージャー
 
-	const std::string& particleGroupName = "Particle";
+	// パーティクル
+	std::unique_ptr< ParticleEmitter> defaultEmitter_ = nullptr;
+	std::unique_ptr< ParticleEmitter> particleEmitter_ = nullptr;
+	std::unique_ptr< ParticleEmitter> particleEmitter2_ = nullptr;
+	std::unique_ptr< ParticleEmitter> particleEmitter3_ = nullptr;
+
 
 	// デバッグカメラのON/OFF用
 	bool isDebugCamera_ = false;
+	bool isLockedCursor_ = false;
+
+	bool isPaused_ = false; // ポーズ中かどうか
 };
